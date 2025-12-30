@@ -2,84 +2,106 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-# 1. KONFIGURASI HALAMAN
-st.set_page_config(page_title="Matawisata Kei", layout="wide")
-st.title("🏝️ Sistem Rekomendasi Wisata Kei")
-st.markdown("Aplikasi ini menghitung rekomendasi pantai terbaik berdasarkan kepentingan kriteria yang Anda tentukan sendiri.")
+st.set_page_config(page_title="Sistem Pakar Wisata Kei", layout="wide")
 
-# 2. DATA DASAR (Berdasarkan Google Sheets Anda)
-# Data ini mencakup 5 kriteria: Harga, Fasilitas, Akses, Keindahan, Jarak
-data_wisata = {
-    'Nama Pantai': ['Ngurbloat', 'Ohoililir', 'Ohoidertawun'],
-    'Harga Tiket (Rp)': [15000, 10000, 25000],   # Cost (Makin murah makin bagus)
-    'Fasilitas': [5, 4, 3],                   # Benefit (Skala 1-5)
-    'Aksesibilitas': [5, 4, 3],               # Benefit (Skala 1-5)
-    'Keindahan Alam': [5, 5, 4],              # Benefit (Skala 1-5)
-    'Jarak dari Kota (Km)': [12, 10, 15]      # Cost (Makin dekat makin bagus)
+st.title("🧪 Portal Analisis Pakar - Matawisata")
+st.markdown("""
+Pada halaman ini, Pakar dapat menentukan **Lokasi Wisata** yang akan dinilai dan memberikan **Poin Kriteria** secara langsung. 
+Sistem akan melakukan perhitungan peringkat menggunakan metode **TOPSIS**.
+""")
+
+# --- LANGKAH 1: INPUT DATA WISATA & KRITERIA OLEH PAKAR ---
+st.header("1. Manajemen Data & Poin Wisata")
+st.info("💡 **Petunjuk:** Pakar bisa menambah baris baru di bawah tabel, mengubah nama lokasi, dan mengisi nilai kriteria (1-10 atau angka lainnya).")
+
+# Data awal sebagai template
+data_template = {
+    'Nama Lokasi': ['Ngurbloat', 'Ohoililir', 'Ohoidertawun'],
+    'Harga (C)': [5000, 10000, 5000],   # Cost
+    'Fasilitas (B)': [5, 4, 3],          # Benefit
+    'Akses (B)': [5, 4, 3],               # Benefit
+    'Keindahan (B)': [5, 5, 4],           # Benefit
+    'Jarak (C)': [12, 10, 15]            # Cost
 }
-df = pd.DataFrame(data_wisata)
 
-# 3. SIDEBAR - INPUT USER (PENGGANTI AHP)
-st.sidebar.header("Atur Prioritas Anda")
-st.sidebar.write("Geser slider untuk menentukan seberapa penting kriteria bagi Anda (1 = Tidak Penting, 9 = Sangat Penting)")
+# Membuat tabel interaktif (Data Editor)
+# num_rows="dynamic" memungkinkan pakar menambah/menghapus baris sendiri
+df_pakar = st.data_editor(
+    pd.DataFrame(data_template), 
+    num_rows="dynamic", 
+    use_container_width=True,
+    key="editor_pakar"
+)
 
-w1 = st.sidebar.slider("Pentingnya Harga Murah", 1, 9, 5)
-w2 = st.sidebar.slider("Pentingnya Fasilitas Lengkap", 1, 9, 7)
-w3 = st.sidebar.slider("Pentingnya Akses Jalan Mudah", 1, 9, 6)
-w4 = st.sidebar.slider("Pentingnya Keindahan Alam", 1, 9, 9)
-w5 = st.sidebar.slider("Pentingnya Jarak Dekat", 1, 9, 4)
+# --- LANGKAH 2: INPUT BOBOT KEPENTINGAN (AHP) ---
+st.header("2. Penentuan Bobot Kepentingan")
+st.write("Tentukan tingkat kepentingan untuk masing-masing kriteria (Skala 1-9):")
 
-# Normalisasi Bobot secara otomatis
-weights_input = np.array([w1, w2, w3, w4, w5])
-weights = weights_input / weights_input.sum()
+col_w = st.columns(5)
+with col_w[0]: w_harga = st.number_input("Harga", 1, 9, 5)
+with col_w[1]: w_fasilitas = st.number_input("Fasilitas", 1, 9, 7)
+with col_w[2]: w_akses = st.number_input("Akses", 1, 9, 6)
+with col_w[3]: w_keindahan = st.number_input("Keindahan", 1, 9, 9)
+with col_w[4]: w_jarak = st.number_input("Jarak", 1, 9, 4)
 
-# 4. PROSES PERHITUNGAN TOPSIS
-# Mengambil hanya kolom angka
-matrix = df.iloc[:, 1:].values
+# --- LANGKAH 3: PROSES ANALISA ---
+if st.button("🚀 Jalankan Analisa Peringkat"):
+    # Cek jika data kosong
+    if df_pakar.empty:
+        st.error("Data lokasi wisata masih kosong! Harap isi minimal satu lokasi.")
+    else:
+        # Menyiapkan Bobot
+        w_array = np.array([w_harga, w_fasilitas, w_akses, w_keindahan, w_jarak])
+        weights = w_array / w_array.sum()
 
-# Normalisasi Matriks
-norm_matrix = matrix / np.sqrt((matrix**2).sum(axis=0))
+        # Ambil matriks keputusan (hanya kolom angka)
+        matrix = df_pakar.iloc[:, 1:].values
+        
+        # 1. Normalisasi Matriks
+        norm_matrix = matrix / np.sqrt((matrix**2).sum(axis=0))
+        
+        # 2. Matriks Terbobot
+        weighted_matrix = norm_matrix * weights
 
-# Matriks Terbobot
-weighted_matrix = norm_matrix * weights
+        # 3. Solusi Ideal Positif (A+) & Negatif (A-)
+        # Index 0 & 4 adalah Cost (Harga & Jarak), sisanya Benefit
+        ideal_pos = [
+            np.min(weighted_matrix[:,0]), np.max(weighted_matrix[:,1]), 
+            np.max(weighted_matrix[:,2]), np.max(weighted_matrix[:,3]), 
+            np.min(weighted_matrix[:,4])
+        ]
+        ideal_neg = [
+            np.max(weighted_matrix[:,0]), np.min(weighted_matrix[:,1]), 
+            np.min(weighted_matrix[:,2]), np.min(weighted_matrix[:,3]), 
+            np.max(weighted_matrix[:,4])
+        ]
 
-# Menentukan Solusi Ideal Positif (A+) dan Negatif (A-)
-# Ingat: Harga (Kolom 0) dan Jarak (Kolom 4) adalah COST
-ideal_pos = [
-    np.min(weighted_matrix[:, 0]), # Harga (Min)
-    np.max(weighted_matrix[:, 1]), # Fasilitas (Max)
-    np.max(weighted_matrix[:, 2]), # Akses (Max)
-    np.max(weighted_matrix[:, 3]), # Keindahan (Max)
-    np.min(weighted_matrix[:, 4])  # Jarak (Min)
-]
+        # 4. Jarak Euclidean (D+ dan D-)
+        d_pos = np.sqrt(((weighted_matrix - ideal_pos)**2).sum(axis=1))
+        d_neg = np.sqrt(((weighted_matrix - ideal_neg)**2).sum(axis=1))
 
-ideal_neg = [
-    np.max(weighted_matrix[:, 0]), # Harga (Max)
-    np.min(weighted_matrix[:, 1]), # Fasilitas (Min)
-    np.min(weighted_matrix[:, 2]), # Akses (Min)
-    np.min(weighted_matrix[:, 3]), # Keindahan (Min)
-    np.max(weighted_matrix[:, 4])  # Jarak (Max)
-]
+        # 5. Skor Preferensi Akhir (V)
+        df_pakar['Skor Akhir'] = d_neg / (d_pos + d_neg)
 
-# Menghitung Jarak Euclidean (D+ dan D-)
-d_pos = np.sqrt(((weighted_matrix - ideal_pos)**2).sum(axis=1))
-d_neg = np.sqrt(((weighted_matrix - ideal_neg)**2).sum(axis=1))
+        # Tampilkan Hasil
+        st.divider()
+        st.subheader("📊 Hasil Analisa Rekomendasi")
+        
+        hasil_urut = df_pakar[['Nama Lokasi', 'Skor Akhir']].sort_values(by='Skor Akhir', ascending=False)
+        
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.write("**Tabel Peringkat:**")
+            st.dataframe(hasil_urut.reset_index(drop=True), use_container_width=True)
+        with c2:
+            st.write("**Visualisasi Skor:**")
+            st.bar_chart(hasil_urut.set_index('Nama Lokasi'))
 
-# Menghitung Skor Akhir (V)
-df['Skor Rekomendasi'] = d_neg / (d_pos + d_neg)
-
-# 5. TAMPILKAN HASIL
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.subheader("🏆 Peringkat Pantai")
-    # Mengurutkan dari skor tertinggi
-    hasil_final = df[['Nama Pantai', 'Skor Rekomendasi']].sort_values(by='Skor Rekomendasi', ascending=False)
-    st.dataframe(hasil_final.reset_index(drop=True), use_container_width=True)
-
-with col2:
-    st.subheader("📊 Grafik Perbandingan Skor")
-    st.bar_chart(data=hasil_final.set_index('Nama Pantai'))
-
-st.divider()
-st.caption("Aplikasi ini menggunakan metode AHP untuk pembobotan dan TOPSIS untuk perangkingan.")
+        # Fitur Tambahan: Download Hasil
+        csv = hasil_urut.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Hasil Analisa (CSV)",
+            data=csv,
+            file_name='hasil_analisa_wisata.csv',
+            mime='text/csv',
+        )
